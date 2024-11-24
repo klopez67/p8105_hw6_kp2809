@@ -1,0 +1,105 @@
+---
+title: "Linear Models"
+author: "Kimberly Lopez"
+date: "2024-11-24"
+output: github_document
+---
+```{r}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+
+```
+
+# Problem 1 
+
+# Problem 2
+ 
+
+Import data. Create a city_state variable (e.g. “Baltimore, MD”), and a binary variable indicating whether the homicide is solved. Omit cities Dallas, TX; Phoenix, AZ; and Kansas City, MO – these don’t report victim race. Also omit Tulsa, AL – this is a data entry mistake. For this problem, limit your analysis those for whom victim_race is white or black. Be sure that victim_age is numeric.
+
+- open case: 0 
+-closed case: 1 
+```{r}
+homicide_data = 
+  read.csv("data/homicide-data.csv")|>
+  janitor::clean_names()|>
+  mutate(
+    city_state = paste(city,state, sep=", "),
+    status_bin= ifelse(disposition=="Open/No arrest", 0, 1), 
+    victim_race = fct_relevel(victim_race, "White"), 
+    victim_sex = fct_relevel(victim_sex, "Female")
+  )|>
+  filter(!city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"))|>
+  filter(victim_race =="White" | victim_race =="Black"  )|>
+  filter(!victim_age =="Unknown")|>
+  mutate(victim_age = as.numeric(victim_age))
+
+class(homicide_data[["victim_age"]])
+class(homicide_data[["victim_sex"]])
+```
+
+For the city of Baltimore, MD, use the glm function to fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors. Save the output of glm as an R object; apply the broom::tidy to this object; and obtain the estimate and confidence interval of the adjusted odds ratio for solving homicides comparing male victims to female victims keeping all other variables fixed.
+```{r}
+
+baltimore_df = 
+  homicide_data|>
+  filter(city_state == "Baltimore, MD")
+
+model = 
+  baltimore_df|>
+  glm(status_bin ~ victim_age + victim_sex + victim_race, family = "binomial", data=_)
+
+model|> 
+  broom::tidy(conf.int=TRUE) |> 
+  mutate(OR = exp(estimate)) |>
+  select(term, OR, conf.low, conf.high) |> 
+  knitr::kable(digits = 3)
+
+```
+
+Now run glm for each of the cities in your dataset, and extract the adjusted odds ratio (and CI) for solving homicides comparing male victims to female victims. Do this within a “tidy” pipeline, making use of purrr::map, list columns, and unnest as necessary to create a dataframe with estimated ORs and CIs for each city.
+
+```{r}
+nest_lm_res =
+  homicide_data |> 
+  nest(data = -city_state) |> 
+  mutate(
+    models = map(data, \(df) lm(status_bin ~ victim_age + victim_sex + victim_race, data = df)),
+    results = map(models, broom::tidy, conf.int = TRUE)) |> 
+  select(-data, -models) |> 
+  unnest(results)
+
+city_OR= 
+  nest_lm_res |> 
+  filter(term == "victim_sexMale") |> 
+  select(city_state, term, estimate, conf.low, conf.high) |> 
+  mutate(
+    term = fct_inorder(term),
+    OR = exp(estimate), 
+    conf.low = exp(conf.low),
+    conf.high = exp(conf.high)) |> 
+  pivot_wider(
+    names_from = term, values_from = estimate)
+
+city_OR
+```
+
+
+Create a plot that shows the estimated ORs and CIs for each city. Organize cities according to estimated OR, and comment on the plot.
+
+```{r}
+city_OR |> 
+  ggplot(aes(x= reorder(city_state, OR), y = OR))+
+  geom_point()  + 
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high)) + 
+  theme(axis.text.x = element_text(angle = 80, hjust = 1))+ 
+  labs(
+    x= "City, State", 
+    title = "Comparing Males to Females odds of having a Solved Homicide case"
+  )
+```
+
+This plot shows increasing OR of males compared to females odds of having their case solved in cities in the US while controling for race and age. In the city of New York, males have 0.73 the odds of having a case closed compared to females holding other factors such as age and race constant. This means that males are less likely to have a closed homicide and solved case compared to females in NY. However, in Fresno California, males have 1.02 the odds of having a case closed compared to females holding all other factors constant. This means males are slightly more likley to have their case resolved than females. 
+
+# Problem 3 
