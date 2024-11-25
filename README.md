@@ -1,8 +1,11 @@
 # p8105_hw6_kp2809
 
 babysex: baby’s sex (male = 1, female = 2)
+
 bhead: baby’s head circumference at birth (centimeters)
+
 blength: baby’s length at birth (centimeteres)
+
 bwt: baby’s birth weight (grams)
 delwt: mother’s weight at delivery (pounds)
 fincome: family monthly income (in hundreds, rounded)
