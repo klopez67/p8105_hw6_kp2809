@@ -1,13 +1,16 @@
 ---
-title: "Linear Models"
+title: "HW6"
 author: "Kimberly Lopez"
 date: "2024-11-24"
 output: github_document
 ---
-```{r}
+```{r include = FALSE}
 library(tidyverse)
 library(dplyr)
 library(ggplot2)
+library(modelr)
+library(glmnet)
+library(purrr)
 
 ```
 
@@ -19,10 +22,10 @@ library(ggplot2)
 Import data. Create a city_state variable (e.g. “Baltimore, MD”), and a binary variable indicating whether the homicide is solved. Omit cities Dallas, TX; Phoenix, AZ; and Kansas City, MO – these don’t report victim race. Also omit Tulsa, AL – this is a data entry mistake. For this problem, limit your analysis those for whom victim_race is white or black. Be sure that victim_age is numeric.
 
 - open case: 0 
--closed case: 1 
+- closed case: 1 
 ```{r}
 homicide_data = 
-  read.csv("data/homicide-data.csv")|>
+  read_csv("data/homicide-data.csv")|>
   janitor::clean_names()|>
   mutate(
     city_state = paste(city,state, sep=", "),
@@ -53,7 +56,7 @@ model =
 model|> 
   broom::tidy(conf.int=TRUE) |> 
   mutate(OR = exp(estimate)) |>
-  select(term, OR, conf.low, conf.high) |> 
+  dplyr::select(term, OR, conf.low, conf.high) |> 
   knitr::kable(digits = 3)
 
 ```
@@ -103,3 +106,167 @@ city_OR |>
 This plot shows increasing OR of males compared to females odds of having their case solved in cities in the US while controling for race and age. In the city of New York, males have 0.73 the odds of having a case closed compared to females holding other factors such as age and race constant. This means that males are less likely to have a closed homicide and solved case compared to females in NY. However, in Fresno California, males have 1.02 the odds of having a case closed compared to females holding all other factors constant. This means males are slightly more likley to have their case resolved than females. 
 
 # Problem 3 
+
+Load and clean the data for regression analysis (i.e. convert numeric to factor where appropriate, check for missing data, etc.).
+
+```{r}
+bwt_df = 
+  read_csv("data/birthweight.csv") |> 
+  janitor::clean_names()|>
+  mutate( 
+    babysex = 
+        case_match(babysex,
+            1 ~ "male",
+            2 ~ "female"),
+    babysex = fct_infreq(babysex),
+    frace =  case_match(frace,
+            1 ~ "white",
+            2 ~ "black", 
+            3 ~ "asian", 
+            4 ~ "puerto rican", 
+            8 ~ "other"),
+    frace = fct_infreq(frace), 
+    mrace = case_match(mrace,
+            1 ~ "white",
+            2 ~ "black", 
+            3 ~ "asian", 
+            4 ~ "puerto rican",
+            8 ~ "other"),
+    mrace = fct_infreq(mrace), 
+    malform = as.logical(malform))
+
+colSums(is.na(bwt_df))
+
+```
+
+Propose a regression model for birthweight. This model may be based on a hypothesized structure for the factors that underly birthweight, on a data-driven model-building process, or a combination of the two. Describe your modeling process and show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
+
+```{r }
+set.seed(123)
+```
+
+**Cross Validation** 
+```{r}
+bwt_df= 
+  bwt_df|>
+   mutate(id = row_number())
+
+train_df = sample_frac(bwt_df, size = .8)
+test_df = anti_join(bwt_df, train_df, by = "id")
+
+x = model.matrix(bwt ~ ., train_df)[,-1]
+y = train_df |> pull(bwt)
+```
+
+
+**Lasso Method**
+```{r}
+
+lambda = 10^(seq(-2, 2.75, 0.1))
+
+lasso_fit =
+  glmnet(x, y, lambda = lambda)
+
+lasso_cv =
+  cv.glmnet(x, y, lambda = lambda)
+
+lambda_opt = lasso_cv[["lambda.min"]]
+
+lasso_fit_opt = 
+  glmnet(x,y, lambda = lambda_opt)
+
+lasso_fit_opt|>
+  broom::tidy()
+```
+```{r}
+lasso_fit_opt |> 
+  broom::tidy() |> 
+  filter(term != "(Intercept)")|>
+  pull(term)
+
+```
+```{r}
+
+model_1 = lm(bwt ~ babysex + bhead + blength + delwt + fincome + frace + gaweeks + mheight + mrace + parity + smoken + wtgain, data = train_df)
+
+summary(model_1)
+
+```
+```{r}
+bwt_df_predictions = 
+  bwt_df |>
+  modelr::add_residuals(model_1) |>
+  modelr::add_predictions(model_1)
+
+# Plot residuals vs fitted values
+bwt_df_predictions |>
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point(alpha=.2)+ 
+  geom_hline(yintercept = 0, linetype = "dashed")+ 
+  labs(title = "Plot of Model Residuals vs. Fitted values")
+  
+```
+
+
+I used the lasso method to identify important predictors for the outcome `bwt`. Since we have multiple coefficients in this data set, I used the lasso method as it adds a penalty on the sum of all coefficients to balance overall fit and coefficient size in the model.  The lasso method returned coefficients which were deemed important to predicting the outcome. 
+
+
+Compare your model to two others:
+
+- One using length at birth and gestational age as predictors (main effects only)
+- One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
+
+```{r}
+model_2= lm(bwt ~ blength + gaweeks , data = train_df)
+model_3= lm(bwt ~  bhead + blength + babysex + bhead*blength*babysex, data = train_df )
+```
+
+Make this comparison in terms of the cross-validated prediction error; use crossv_mc and functions in purrr as appropriate.
+
+```{r}
+cv_df = crossv_mc(bwt_df,100)
+
+cv_df |> 
+  pull(train) |> 
+  nth(1)|>
+  as.tibble()
+
+cv_df |> 
+  pull(test) |> 
+  nth(1) |> 
+  as_tibble()
+```
+```{r}
+cv_df =
+  cv_df |> 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble))|>
+  mutate(
+    model_1= map(train, \(df) lm(bwt ~ babysex + bhead + blength + delwt + fincome + frace + gaweeks + menarche + malform + mheight + momage + mrace + parity + smoken + wtgain, data =df)), 
+    model_2= map(train, \(df) lm(bwt ~ blength + gaweeks , data = df)),
+    model_3 = map(train, \(df) lm(bwt ~  bhead + blength + babysex + bhead*blength*babysex, data = df )))|>
+  mutate(
+    rmse_m1 = map2_dbl(model_1, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_m2 = map2_dbl(model_2, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_m3 = map2_dbl(model_3, test, \(mod, df) rmse(model = mod, data = df)))
+
+
+```
+
+Plotting the prediction error to compare models
+
+```{r}
+
+cv_df |> 
+  dplyr::select(starts_with("rmse"))|> 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") |> 
+  mutate(model = fct_inorder(model)) |> 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+```
+
+This plot shows that model 1 had a lower Root Mean Squared Error compared to Model 2 and 3 and therefore consistently out predicts the model 2 of `blength` and `gaweeks` and 3 which uses `bhead`, `blength`, `babysex`, and their interaction term. 
