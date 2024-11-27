@@ -11,10 +11,42 @@ library(ggplot2)
 library(modelr)
 library(glmnet)
 library(purrr)
+library(rnoaa)
+library(p8105.datasets)
+
+set.seed(5)
 
 ```
 
-# Problem 1 
+# Problem 1
+
+Load the data
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+```{r}
+n_bootstrap = 5000
+
+bootstrap_results = 
+  replicate(n_bootstrap, {
+    bootstrap_sample= sample_n(weather_df, nrow(weather_df), replace = TRUE)
+    
+    model= lm(tmax ~ tmin, data = bootstrap_sample)
+})
+
+```
+
 
 # Problem 2
  
@@ -141,10 +173,6 @@ colSums(is.na(bwt_df))
 
 Propose a regression model for birthweight. This model may be based on a hypothesized structure for the factors that underly birthweight, on a data-driven model-building process, or a combination of the two. Describe your modeling process and show a plot of model residuals against fitted values – use add_predictions and add_residuals in making this plot.
 
-```{r }
-set.seed(123)
-```
-
 **Cross Validation** 
 ```{r}
 bwt_df= 
@@ -269,4 +297,4 @@ cv_df |>
   ggplot(aes(x = model, y = rmse)) + geom_violin()
 ```
 
-This plot shows that model 1 had a lower Root Mean Squared Error compared to Model 2 and 3 and therefore consistently out predicts the model 2 of `blength` and `gaweeks` and 3 which uses `bhead`, `blength`, `babysex`, and their interaction term. 
+This plot shows that model 1 had a lower Root Mean Squared Error compared to Model 2 and 3 and therefore consistently out predicts the model 2 of `blength` and `gaweeks` and 3 which uses `bhead`, `blength`, `babysex`, and their interaction term. This is likely due to the model including a broader set of relevant variables to birth weight, which helps it make more accurate predictions based on the training dataset.
